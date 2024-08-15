@@ -1,0 +1,699 @@
+---
+title: "data_exploration"
+author: "Susan Campbell"
+date: "2024-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data descriptions
+
+### Exposure data
+
+These data were provided by Dr. Yukiko Hirabayashi's team. Key features:
+
+-   Temporal coverage and resolution: 2071-2100 with resolution 0.25 \* 0.25 degrees (
+
+-   Spatial coverage and resolution: globe with high resolution (point data)
+
+-   Measure of flood frequency: Return period (number of years) for 10-, 30- and 100-year flood events (according to historical 1971-2000 data)
+
+-   Measure of flood intensity: none
+
+-   Future scenarios: SSP126 ("sustainability" at 1.0-1.8 C warming by 2100), SSP 245 ("middle of road" at 1.3-2.4 C by 2100), and SSP 585 ("fossil fuels" at 3.3-5.7 C by 2100)
+
+For more information about its origins, see: Hirabayashi, Y., Tanoue, M., Sasaki, O., Zhou, X., & Yamazaki, D. (2021). Global exposure to flooding from the new CMIP6 climate model projections. *Scientific Reports*, *11*(1), 3740.
+
+### Hazard data
+
+Describe!
+
+### Country and region data
+
+Describe!
+
+### Population data
+
+Describe!
+
+## Load libraries and set directory
+
+```{r libs, echo=FALSE}
+
+library(tidyverse)
+library(tiff)
+library(raster)
+library(rasterVis)
+library(readr)
+library(sf)
+library(terra)
+library(rmapshaper)
+library(viridis)
+library(cowplot)
+library(RColorBrewer)
+
+# specify directories
+dir <- "/Users/SusanCampbell/UW_HMS_R/capstone/"
+setwd(dir) 
+
+# load functions in my process_input_functions.R
+source(paste0(dir, "/processing_functions.R")) 
+
+```
+
+## Load data and set params
+
+Set values related to return period and time window
+
+```{r set_time, echo=FALSE}
+
+# set values related to scenario
+initial_return_period <- 30
+climate_future <- "SSP585"
+flood_size <- paste0(initial_return_period, "yr")
+
+# set seed for reproducibility
+set.seed(48)
+
+# set values related to time of interest
+time_window <- 100
+start_year <- 2024
+projection_year <- 2085 # midway between 2071 and 2100
+end_year <- start_year + time_window
+
+# locations to save results
+grid_results_dir <- paste0(dir, "results/", flood_size, climate_future, "/grid")
+country_results_dir <- paste0(dir, "results/", flood_size, climate_future, "/country")
+
+```
+
+Read in other datasets
+
+```{r load_data, echo=FALSE}
+
+# load exposures data: Hirabayashi et al. 2021 ------------------------
+
+# load data for SSP 126 scenario
+# rp_10yr_ssp126 <- rast(paste0(dir, "data/ssp126/RP_for_10yr_flood_storage_ssp126.tif"))
+# rp_30yr_ssp126 <- rast(paste0(dir, "data/ssp126/RP_for_30yr_flood_storage_ssp126.tif"))
+# rp_100yr_ssp126 <- rast(paste0(dir, "data/ssp126/RP_for_100yr_flood_storage_ssp126.tif"))
+# 
+# # load data for SSP 245 scenario
+# rp_10yr_ssp245 <- rast(paste0(dir, "data/ssp245/RP_for_10yr_flood_storage_ssp245.tif"))
+# rp_30yr_ssp245 <- rast(paste0(dir, "data/ssp245/RP_for_30yr_flood_storage_ssp245.tif"))
+# rp_100yr_ssp245 <- rast(paste0(dir, "data/ssp245/RP_for_100yr_flood_storage_ssp245.tif"))
+# 
+# # load data for SSP 585 scenario
+# rp_10yr_ssp585 <- rast(paste0(dir, "data/ssp585/RP_for_10yr_flood_storage_ssp585.tif"))
+# rp_30yr_ssp585 <- rast(paste0(dir, "data/ssp585/RP_for_30yr_flood_storage_ssp585.tif"))
+# rp_100yr_ssp585 <- rast(paste0(dir, "data/ssp585/RP_for_100yr_flood_storage_ssp585.tif"))
+
+
+# load country shapefiles and region hierarchies ---------------------
+
+# from IHME
+country_boundaries <- st_read("data/GBD_countries/lbd_standard_admin_0_simplified.shp")
+names(country_boundaries) <- c("code", "name", "loc_id", "geo_id", "geometry")
+
+country_id_names_dict <- country_boundaries %>%
+  as.data.frame() %>%
+  dplyr::select("code", "name", "loc_id") %>%
+  mutate(index = row_number())
+
+# GBD location hierarchies: Global burden of disease (GBD) data and Tools Guide: Full list of locations, diseases, injuries, and risk factors. Institute for Health Metrics and Evaluation. (2024). https://www.healthdata.org/research-analysis/about-gbd/gbd-data-and-tools-guide
+location_hierarchy <- read_csv("data/gbd_location_hierarchy.csv")
+country_region_sdi_dict <- read.csv(file = "data/location_hierarchy.csv")
+
+
+# load in population data --------------------------------------------
+
+# from WorldPop, processed and corrected by IHME
+# load population data from with 0.0417 * 0.0417 degree resolution (~5km at equator)
+pop <- rast(paste0(dir, "data/worldpop_total_1y_2024_00_00.tif"))
+
+region_order <- c("Eastern Europe", "Central Europe", "Southern Sub-Saharan Africa", 
+                  "North Africa and Middle East", "Central Asia", NA, "Western Europe", 
+                  "Australasia", "Southern Latin America", "High-income North America", 
+                  "Western Sub-Saharan Africa", "Caribbean", "East Asia", "Central Latin America", 
+                  "Tropical Latin America", "Eastern Sub-Saharan Africa", "Andean Latin America", 
+                  "Oceania", "South Asia", "High-income Asia Pacific", "Central Sub-Saharan Africa", 
+                  "Southeast Asia")
+
+```
+
+Specify whether to write intermediate results to tif files, whether to generate figures, etc.
+
+```{r read_and_write_settings, echo=FALSE}
+
+# if TRUE, grid-level results will be read in from tif files instead of generated anew
+read_grid_results <- TRUE
+# if TRUE, grid-level results will be saved as tif files
+write_grid_results <- FALSE
+# if TRUE, figures (maps and histograms) of grid-level results will be saved as pdf files
+generate_grid_figures <- TRUE
+
+```
+
+## Grid results
+
+### Generate simulated flood occurrence
+
+From return period, generate simulated binary indicators of flood occurrence for each of the next 100 years. Memory is an issue here. That's why we're testing with just a random sample (0.1%!) from the input raster.
+
+```{r flood_simulation, echo=FALSE}
+
+# generate time series with changing return period ---------------------------
+
+# note: in a test of Option 1, it took ~38 minutes to generate 100 years 
+  # for 100% of raster for one of the nine magnitude/climate scenarios
+
+if(read_grid_results == TRUE) {
+  
+  flood_occurrence_stack <- rast(paste0(
+    grid_results_dir, "/output_", flood_size, "_", climate_future,
+    "_flood_occurrence.tif"))
+  
+} else {
+  
+  # apply function to all cells in raster
+  # see process_inputs_functions.R
+  rp_slope_raster <- app(rp_100yr_ssp245, 
+                         function(x) calculate_rp_slope(projected_rp = x))
+  
+  # initialize list to store yearly flood draw rasters
+  yearly_flood_rasters <- vector("list", time_window)
+  
+  # apply binomial flood draws to all cells for a given year
+  for (year in start_year:(start_year + time_window - 1)) {
+    year_index <- year - start_year + 1
+    print(paste("Processing year:", year))
+    
+    yearly_flood_rasters[[year_index]] <- suppressWarnings(
+      app(rp_slope_raster, function(cell_rp_slope) {
+        sapply(cell_rp_slope, function(x) {
+          calculate_year_specific_rp(calculation_year = year, cell_rp_slope = x)
+        })
+      }))
+  }
+  
+  # convert the list of rasters to a SpatRaster
+  flood_occurrence_stack <- rast(yearly_flood_rasters)
+  
+}
+
+
+# save to file -------------------------------------------------------------------
+
+if (write_grid_results == TRUE) {
+  writeRaster(flood_occurrence_stack,
+              paste0(grid_results_dir, "/output_", flood_size, "_", climate_future,
+                     "_flood_occurrence.tif"),
+              filetype = "GTiff", overwrite = TRUE)
+}
+
+
+# check for plausibility: sum flood occurrences per cell ---------------------------------
+
+# choose year(s) to plot as an example
+early_year <- 3
+late_year <- 97
+
+map_floods_early <- plot_number_floods_map(flood_occurrence_stack, year = early_year, 
+                        title = paste("Cells with", flood_size,
+                                      "floods in", climate_future, "(year", early_year, ")"))
+
+map_floods_late <- plot_number_floods_map(flood_occurrence_stack, year = late_year, 
+                        title = paste("Cells with", flood_size,
+                                      "floods in", climate_future, "(year", late_year, ")"))
+
+
+hist_floods_early <- plot_number_floods_hist(flood_occurrence_stack, year = early_year, 
+                         title = paste("Cells with", flood_size,
+                                      "floods in", climate_future, "(year", early_year, ")"))
+
+hist_floods_late <- plot_number_floods_hist(flood_occurrence_stack, year = late_year, 
+                         title = paste("Cells with", flood_size,
+                                      "floods in", climate_future, "(year", late_year, ")"))
+
+
+if(generate_grid_figures == TRUE) {
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_floods_year", early_year, "_", flood_size, climate_future, ".pdf"),
+    map_floods_early, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_floods_year", late_year, "_", flood_size, climate_future, ".pdf"),
+    map_floods_late, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+  ggsave(paste0(grid_results_dir,
+                "/hist_floods_year", early_year, "_", flood_size, climate_future, ".pdf"),
+    hist_floods_early, 
+    width = 6,
+    height = 4,
+    dpi = 300)
+  
+  ggsave(paste0(grid_results_dir,
+                "/hist_floods_year", late_year, "_", flood_size, climate_future, ".pdf"),
+    hist_floods_late, 
+    width = 6,
+    height = 4,
+    dpi = 300)
+  
+}
+
+
+# plot map aggregated over time ----------------------------------------------------------
+# see process_inputs_functions.R
+flood_sum_raster <- sum_over_time(flood_occurrence_stack)
+
+flood_occurrence_over_time <- plot_occurrence_over_time_map(flood_sum_raster,
+                                                  title = paste("Sum of", 
+                                                                flood_size,"floods, over next",
+                                                                time_window, "years, in",
+                                                                climate_future),
+                                                  fixed_binned_scales = FALSE)
+
+flood_occurrence_over_time_comparable <- plot_occurrence_over_time_map(flood_sum_raster,
+                                                  title = paste("Sum of", 
+                                                                flood_size,"floods, over next",
+                                                                time_window, "years, in",
+                                                                climate_future),
+                                                  fixed_binned_scales = TRUE)
+
+if(generate_grid_figures == TRUE) {
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_floods_100_years", "_", flood_size, climate_future, ".pdf"),
+    flood_occurrence_over_time, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+    ggsave(paste0(grid_results_dir,
+                "/map_floods_100_years", "_", flood_size, climate_future, "_comparable.pdf"),
+    flood_occurrence_over_time_comparable, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+}
+
+```
+
+### Process population density data
+
+Aggregate population to level of spatial resolution of flood grid
+
+```{r population_to_coarse_grid, echo=FALSE}
+
+# calculate difference in resolution between flood grid and population grid
+res_factor <- round(res(flood_occurrence_stack) / res(pop))
+
+# ensure res_factor is the same for both x and y directions
+if (res_factor[1] != res_factor[2]) {
+  stop("Resolution difference between flood and population grids is not uniform in x and y directions.")
+}
+
+# sum population data to level of resolution of flood grid
+pop_aggregated <- aggregate(pop, fact = res_factor[1], 
+                            fun = sum, expand = TRUE)
+
+pop_country_aggregated <- project(pop_aggregated, crs(country_boundaries))
+
+# aaggregate population to country level
+pop_country_aggregated <- terra::extract(pop_country_aggregated, 
+                                         country_boundaries[, c("name", "loc_id", "geometry")],
+                                         fun = sum, na.rm = TRUE, method = 'simple')
+names(pop_country_aggregated) <- c("ID", "worldpop")
+
+
+# check that resolutions now match
+if (!all.equal(res(flood_occurrence_stack), res(pop_aggregated))) {
+  stop("Aggregation did not match flood and population resolutions correctly.")
+}
+
+# # double check that this aggregates as expected by spot checking a few cells
+# # open old raster and new raster, choose coordinates, and make sure they are a sum
+# # google a few coordinates for a rough triple check
+# get_pop <- function(lat, long, pop_type) {
+#   place_coords <- cbind(long, lat)  # Note that longitude is first, then latitude
+#   place_point <- vect(place_coords, crs = crs(pop_type))
+#   place_pop_value <- extract(pop_type, place_point)
+#   return(place_pop_value)
+# }
+# 
+# # square area of Beijing: 16,808 km2. population: 21,540,000 (2018)
+# beijing_agg <- get_pop(39.9042, 116.4074, pop_aggregated)
+# beijing <- get_pop(39.9042, 116.4074, pop)
+# 
+# # square area of Bozeman MT: 49.6 km2. population: 56,123 (2022)
+# bozemanMT_agg <- get_pop(45.6793, -111.0373, pop_aggregated)
+# bozemanMT <- get_pop(45.6793, -111.0373, pop)
+
+
+# plotting checks -------------------------------------------------------------------
+
+map_pop <- plot_pop_map(pop_aggregated)
+hist_pop <- plot_pop_hist(pop_aggregated)
+
+if(generate_grid_figures == TRUE) {
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_pop_", flood_size, climate_future, ".pdf"),
+    map_pop, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+  ggsave(paste0(grid_results_dir,
+                "/hist_pop_", flood_size, climate_future, ".pdf"),
+    hist_pop, 
+    width = 6,
+    height = 4,
+    dpi = 300)
+  
+}
+
+```
+
+### Calculate people exposed
+
+Calculate number of people exposed to each flood-year per cell
+
+```{r exposed_pop_in_grid, echo=FALSE}
+
+if(read_grid_results == TRUE) {
+  
+  # read in from file if needed
+  exposed_stack <- rast(paste0(
+    grid_results_dir, "/output_", flood_size, "_", climate_future,
+    "_exposures.tif"))
+  
+} else {
+
+  # calculate exposed population for each year (multiply flood occurrences by population)
+  exposed_list <- vector("list", nlyr(flood_occurrence_stack))
+  
+  # pop_aggregated should be multiplied onto every cell within each layer of   
+  # flood_occurrence_stack
+  for (i in 1:nlyr(flood_occurrence_stack)) {
+    exposed_list[[i]] <- flood_occurrence_stack[[i]] * pop_aggregated
+  }
+  
+  exposed_stack <- rast(exposed_list)
+
+}
+
+# write file to tif -------------------------------------------------------------------
+
+# write file to .tif if needed
+if (write_grid_results == TRUE) {
+  writeRaster(exposed_stack,
+            paste0(grid_results_dir, "/output_", flood_size, "_", climate_future,
+                  "_exposures.tif"),
+            filetype = "GTiff", overwrite = TRUE)
+}
+
+
+# example year maps and histograms ---------------------------------------------------------
+
+# choose year(s) to plot as an example
+early_year <- 3
+late_year <- 97
+
+map_exposed_early <- plot_number_exposed_map(exposed_stack, year = early_year, 
+                        title = paste("People exposed to", flood_size,
+                                      "floods in", climate_future, "(year", early_year, ")"),
+                        fixed_binned_scales = FALSE)
+map_exposed_early_comparable <- plot_number_exposed_map(exposed_stack, year = early_year, 
+                        title = paste("People exposed to", flood_size,
+                                      "floods in", climate_future, "(year", early_year, ")"),
+                        fixed_binned_scales = TRUE)
+
+map_exposed_late <- plot_number_exposed_map(exposed_stack, year = late_year, 
+                        title = paste("People exposed to", flood_size,
+                                      "floods in", climate_future, "(year", late_year, ")"),
+                        fixed_binned_scales = FALSE)
+map_exposed_late_comparable <- plot_number_exposed_map(exposed_stack, year = late_year, 
+                                title = paste("People exposed to", flood_size,
+                                          "floods in", climate_future, "(year", late_year, ")"),
+                                fixed_binned_scales = TRUE)
+
+
+hist_exposed_early <- plot_number_exposed_hist(exposed_stack, year = early_year, 
+                         title = paste("People exposed to", flood_size,
+                                      "floods in", climate_future, "(year", early_year, ")"))
+
+hist_exposed_late <- plot_number_exposed_hist(exposed_stack, year = late_year, 
+                         title = paste("People exposed to", flood_size,
+                                      "floods in", climate_future, "(year", late_year, ")"))
+
+
+if(generate_grid_figures == TRUE) {
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_exposed_year", early_year, "_", flood_size, climate_future, ".pdf"),
+    map_exposed_early, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_exposed_year", late_year, "_", flood_size, climate_future, ".pdf"),
+    map_exposed_late, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+  ggsave(paste0(grid_results_dir,
+                "/hist_exposed_year", early_year, "_", flood_size, climate_future, ".pdf"),
+    hist_exposed_early, 
+    width = 6,
+    height = 4,
+    dpi = 300)
+  
+  ggsave(paste0(grid_results_dir,
+                "/hist_exposed_year", late_year, "_", flood_size, climate_future, ".pdf"),
+    hist_exposed_late, 
+    width = 6,
+    height = 4,
+    dpi = 300)
+  
+}
+
+
+# aggregated over time maps -------------------------------------------------------------
+
+# see process_inputs_functions.R
+exposure_sum_raster <- sum_over_time(exposed_stack)
+
+exposure_over_time <- plot_exposure_over_time_map(exposure_sum_raster,
+                                                  title = paste("Sum of people exposed to", 
+                                                                flood_size,"floods, over next",
+                                                                time_window, "years, in",
+                                                                climate_future),
+                                                  fixed_binned_scales = FALSE)
+
+exposure_over_time_comparable <- plot_exposure_over_time_map(exposure_sum_raster,
+                                                  title = paste("Sum of people exposed to", 
+                                                                flood_size,"floods, over next",
+                                                                time_window, "years, in",
+                                                                climate_future),
+                                                  fixed_binned_scales = TRUE)
+
+if(generate_grid_figures == TRUE) {
+  
+  ggsave(paste0(grid_results_dir,
+                "/map_exposed_100_years", "_", flood_size, climate_future, ".pdf"),
+    exposure_over_time, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+  
+    ggsave(paste0(grid_results_dir,
+                "/map_exposed_100_years", "_", flood_size, climate_future, "_comparable.pdf"),
+    exposure_over_time_comparable, 
+    width = 9,
+    height = 4,
+    dpi = 1000)
+}
+
+```
+
+### Calculate fraction of people exposed
+
+```{r fraction_exposed, echo=FALSE}
+
+if(read_grid_results == TRUE) {
+  
+  fraction_country_exposed <- read.csv(paste0(country_results_dir, 
+                                              "/fraction_country_exposed_",
+                                              flood_size, climate_future, ".csv"))
+} else {
+  
+  # calculate proportion of each country exposed to floods for each year
+  fraction_country_exposed <- aggregate_exposure_to_country(exposed_stack, 
+                                                            country_boundaries,
+                                                            pop_country_aggregated)
+}
+
+if(write_grid_results == TRUE) {
+  
+  write.csv(fraction_country_exposed, 
+            file = paste0(country_results_dir, "/fraction_country_exposed_",
+                          flood_size, climate_future, ".csv"),
+            row.names = FALSE)
+  
+}
+
+```
+
+## Analyses and visualizations
+
+```{r scenario_summary_plots, echo=FALSE}
+
+# stitch together maps ---------------------------------------------------------------------
+
+# create a list of the plots to include
+plots <- list(map_floods_early, map_floods_late, flood_occurrence_over_time, 
+              map_exposed_early, map_exposed_late, exposure_over_time, 
+              map_pop)
+
+scenario_summary_plot <- plot_grid(plotlist = plots, ncol = 3, nrow = 3)
+
+# save as pdf
+save_plot(filename = paste0(grid_results_dir, "/scenario_summary_", 
+                            flood_size, "_", climate_future,".pdf"), 
+          plot = scenario_summary_plot, 
+          dpi = 2400,
+          base_height = 18, base_width = 30)
+
+```
+
+## Flood frequency changes
+
+```{r region_summaries, echo=FALSE}
+
+# calculate flood counts for the first 50 years and the second 50 years
+flood_counts_first_half_century <- count_floods(flood_occurrence_stack, 1, 50)
+flood_counts_second_half_century <- count_floods(flood_occurrence_stack, 51, time_window)
+
+# extract and summarize flood counts for communities within each country for the first 50 years
+country_flood_counts_first_half_century <- extract_flood_counts(flood_counts_first_half_century,
+                                                                country_boundaries)
+summary_floods_first_half_century <- summarize_flood_counts(country_flood_counts_first_half_century,
+                                                            country_boundaries,
+                                                            country_region_sdi_dict)
+
+# extract and summarize flood counts for communities within each country for the second 50 years
+country_flood_counts_second_half_century <- extract_flood_counts(flood_counts_second_half_century,
+                                                                 country_boundaries)
+summary_floods_second_half_century <- summarize_flood_counts(country_flood_counts_second_half_century,
+                                                             country_boundaries,
+                                                             country_region_sdi_dict)
+
+# combine results for both time periods
+summary_floods_first_half_century$time_period <- "First 50 Years"
+summary_floods_second_half_century$time_period <- "Second 50 Years"
+
+tabulated_floods <- bind_rows(summary_floods_first_half_century, 
+                              summary_floods_second_half_century) %>%
+  pivot_longer(cols = -c(region_name, time_period),
+               names_to = "community_floods_tally",
+               values_to = "proportion")
+tabulated_floods$community_floods_tally <- factor(tabulated_floods$community_floods_tally, 
+                                                  levels = c("0", "1-2", "3-4", "5-7", 
+                                                             "8-10", "11-15", ">15"))
+tabulated_floods$region_name <- factor(tabulated_floods$region_name, 
+                                       levels = region_order)
+
+tabulated_floods$community_floods_tally <- factor(tabulated_floods$community_floods_tally,
+                                                  levels = c("0", "1-2", "3-4", "5-7", 
+                                                             "8-10", "11-15", ">15"))
+
+
+
+num_colors <- length(unique(tabulated_floods$community_floods_tally))
+
+flood_first_half_stackedbar <- ggplot(data = filter(tabulated_floods, 
+                                        time_period == "First 50 Years" & !is.na(region_name)),
+                                      aes(x = region_name, y = proportion, 
+                                          fill = community_floods_tally)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Blues", name = "Number of \nfloods") +
+  labs(title = "Flood frequency in communities of each region, first half of next century",
+       x = NULL,
+       y = NULL) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(-1, 1, by = 0.2)) +
+  theme(axis.text = element_text(size = 14),
+        legend.position = "none")
+ggsave(paste0(country_results_dir,
+                "/flood_freq_first_half_century", "_", flood_size, climate_future, ".pdf"),
+    flood_first_half_stackedbar, 
+    width = 6,
+    height = 7,
+    dpi = 1000)
+
+flood_second_half_stackedbar <- ggplot(data = filter(tabulated_floods, 
+                                        time_period == "Second 50 Years" & !is.na(region_name)), 
+                                       aes(x = region_name, y = proportion, 
+                                           fill = community_floods_tally)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Blues", name = "Number of \nfloods") +
+  labs(title = "Flood frequency in communities of each region, second half of next century",
+       x = NULL,
+       y = NULL) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(-1, 1, by = 0.2)) +
+  theme(axis.text = element_text(size = 14),
+        legend.position = "bottom")
+ggsave(paste0(country_results_dir,
+                "/flood_freq_second_half_century", "_", flood_size, climate_future, ".pdf"),
+    flood_second_half_stackedbar, 
+    width = 20,
+    height = 7,
+    dpi = 1000)
+
+
+write.csv(tabulated_floods, 
+          file = paste0(dir, "/tabulated_floods_",
+                        flood_size, climate_future, ".csv"),
+          row.names = FALSE)
+
+
+
+```
+
+## Free time dreams
+
+We can dream, right?
+
+```{r dreams, echo=FALSE}
+
+# get (gridded or country-level) population projections and use those to recalculate exposed flood persons. Apparently James is working on this
+
+# use finer resolution flood exposures from Kimura: "decreasing the spatial resolution of the flood-hazard map from 90 to 900m increased the exposure by 51%–94% for different population products"
+
+# try a sensitivity analysis of how results change considering population growth (with or without changes in population distribution)
+
+# find a measure of vulnerability (at country level) and apply to the calculation of flood-related deaths
+
+# use the SDI-specific relative risks (one provided for low SDI countries and the other for high SDI countries). From Hirabayashi paper: "previous studies have demonstrated that vulnerability to flooding has changed over time in association with economic development."
+
+# make 1,000 draws of flood futures (using annual exceedance probability = 1 / return period? or a different formula/concept?) to be able to calculate uncertainty intervals. See comment from Laura below
+
+# reflect the increased hazard (RR) expected at later time points in worse climate scenarios based on IPCC (suggested that warming temperatures are also expected to increase the hazard of a given flooding event independent of flood frequency or numbers of people exposed. Projected increases in direct flood damages are higher by 1.4 to 2 times at 2°C and 2.5 to 3.9 times at 3°C compared to 1.5°C global warming without adaptation).
+
+```

@@ -1,0 +1,494 @@
+---
+title: "Analyses, tables, visuals"
+author: "Susan Campbell"
+date: "2024-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Set up
+
+```{r libs, echo=FALSE}
+
+library(tidyverse)
+library(viridis)
+library(cowplot)
+library(sf)
+library(RColorBrewer)
+
+# set flood size to process
+flood_size <- "30yr"
+
+# specify directories
+dir <- "/Users/SusanCampbell/UW_HMS_R/capstone/"
+setwd(dir) 
+# set dir to save results to 
+results_dir <- paste0(dir, "results/overarch_", flood_size)
+
+# load functions in my process_input_functions.R
+source(paste0(dir, "processing_functions.R")) 
+
+```
+
+## Load data and set params
+
+```{r load_data, echo=FALSE}
+
+if(flood_size == "10yr") {
+  ssp126_yearly <- read.csv(file = get_file("10yr", "SSP126", "yearly"))
+  ssp126_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_10yrSSP126.csv"))
+
+  ssp245_yearly <- read.csv(file = get_file("10yr", "SSP245", "yearly"))
+  ssp245_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_10yrSSP245.csv"))
+
+  ssp585_yearly <- read.csv(file = get_file("10yr", "SSP585", "yearly"))
+  ssp585_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_10yrSSP585.csv"))
+}
+
+if(flood_size == "30yr") {
+  ssp126_yearly <- read.csv(file = get_file("30yr", "SSP126", "yearly"))
+  ssp126_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_30yrSSP126.csv"))
+
+  ssp245_yearly <- read.csv(file = get_file("30yr", "SSP245", "yearly"))
+  ssp245_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_30yrSSP245.csv"))
+
+  ssp585_yearly <- read.csv(file = get_file("30yr", "SSP585", "yearly"))
+  ssp585_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_30yrSSP585.csv"))
+}
+
+if(flood_size == "100yr") {
+  ssp126_yearly <- read.csv(file = get_file("100yr", "SSP126", "yearly"))
+  ssp126_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_100yrSSP126.csv"))
+
+  ssp245_yearly <- read.csv(file = get_file("100yr", "SSP245", "yearly"))
+  ssp245_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_100yrSSP245.csv"))
+
+  ssp585_yearly <- read.csv(file = get_file("100yr", "SSP585", "yearly"))
+  ssp585_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_100yrSSP585.csv"))
+}
+
+# read in map of country names to region identifiers and SDI info
+country_region_sdi_dict <- read.csv(file = "data/location_hierarchy.csv")
+
+# read in country boundaries shapefile
+country_boundaries <- st_read("data/GBD_countries/lbd_standard_admin_0_simplified.shp")
+names(country_boundaries) <- c("code", "name", "loc_id", "geo_id", "geometry")
+
+```
+
+```{r load_data, echo=FALSE}
+
+read_in_data <- FALSE
+write_country_results <- FALSE
+generate_country_figures <- FALSE
+
+```
+
+## Produce summaries by decade
+
+Calculate the percent change in deaths (and/or death rate) for each decade relative to the base decade, and make a map for all countries, for each of the nine climate future / flood magnitude scenarios
+
+```{r decade_changes, echo=FALSE}
+
+# 10 year floods ------------------------------------------------
+
+# calculate mean for the decade for each value (_deacde)
+ssp126_decade <- summarize_decades(ssp126_yearly,
+                                   region_map = country_region_sdi_dict)
+ssp245_decade <- summarize_decades(ssp245_yearly,
+                                   region_map = country_region_sdi_dict)
+ssp585_decade <- summarize_decades(ssp585_yearly,
+                                   region_map = country_region_sdi_dict)
+
+# calculate percent change in decade mean from first decade for each value  (_change_by_decade)
+ssp126_change_by_decade <- relative_decade_change(ssp126_decade,
+                                                  region_map = country_region_sdi_dict)
+ssp245_change_by_decade <- relative_decade_change(ssp245_decade,
+                                                  region_map = country_region_sdi_dict)
+ssp585_change_by_decade <- relative_decade_change(ssp585_decade,
+                                                  region_map = country_region_sdi_dict)
+
+```
+
+Summarize for countries and regions
+
+```{r summarize_regions, echo=FALSE}
+
+ssp126_country_death_rate <- summarize_by_geography(ssp126_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "name")
+ssp126_region_death_rate <- summarize_by_geography(ssp126_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name")
+write.csv(ssp126_region_death_rate, 
+            file = paste0(results_dir, "/ssp126_region_death_rate.csv"),
+            row.names = FALSE)
+ssp126_superregion_death_rate <- summarize_by_geography(ssp126_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "superregion_name")
+
+ssp245_country_death_rate <- summarize_by_geography(ssp245_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "name")
+ssp245_region_death_rate <- summarize_by_geography(ssp245_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name")
+write.csv(ssp245_region_death_rate, 
+            file = paste0(results_dir, "/ssp245_region_death_rate.csv"),
+            row.names = FALSE)
+ssp245_superregion_death_rate <- summarize_by_geography(ssp245_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "superregion_name")
+
+ssp585_country_death_rate <- summarize_by_geography(ssp585_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "name")
+ssp585_region_death_rate <- summarize_by_geography(ssp585_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name")
+write.csv(ssp585_region_death_rate, 
+            file = paste0(results_dir, "/ssp585_region_death_rate.csv"),
+            row.names = FALSE)
+ssp585_superregion_death_rate <- summarize_by_geography(ssp585_change_by_decade,
+                                                        "flood_attributable_death_rate",
+                                                        "superregion_name")
+
+```
+
+## Compare climate futures
+
+Calculate the ratio of flood-related deaths in the worst climate future (SSP 585) relative to those in the middle-of-the-road (SSP 245) and best-case (SSP 126) scenarios, then generate a map or heatmap of those ratios for the three flood magnitudes for all countries for each of the next ten decades.
+
+```{r climate_diffs, echo=FALSE}
+
+# merge the dataframes on the common columns (country and decade)
+ssp_245_to_126_compare <- ssp126_change_by_decade %>%
+  inner_join(ssp245_change_by_decade, 
+             by = c("code", "name", "loc_id", "decade"), 
+             suffix = c("_ssp126", "_ssp245"))
+ssp_585_to_126_compare <- ssp126_change_by_decade %>%
+  inner_join(ssp585_change_by_decade, 
+             by = c("code", "name", "loc_id", "decade"), 
+             suffix = c("_ssp126", "_ssp585"))
+ssp_585_to_245_compare <- ssp245_change_by_decade %>%
+  inner_join(ssp585_change_by_decade, 
+             by = c("code", "name", "loc_id", "decade"), 
+             suffix = c("_ssp245", "_ssp585"))
+
+# divide the value columns in the ssp245 version by those in the ssp126 version
+ssp_245_to_126_compare <- ssp_245_to_126_compare %>%
+  mutate(
+    population_ratio = population_ssp245 / population_ssp126,
+    #floods_ratio = floods_ssp245 / floods_ssp126,
+    fraction_exposed_ratio = fraction_exposed_ssp245 / fraction_exposed_ssp126,
+    #number_exposed_ratio = number_exposed_ssp245 / number_exposed_ssp126,
+    flood_attributable_deaths_ratio  = flood_attributable_deaths_ssp245 /
+      flood_attributable_deaths_ssp126,
+    flood_attributable_death_rate_ratio = flood_attributable_death_rate_ssp245 /
+      flood_attributable_death_rate_ssp126,
+    population_change_ratio = population_change_ssp245 / population_change_ssp126,
+    #floods_change_ratio = floods_change_ssp245 / floods_change_ssp126,
+    fraction_exposed_change_ratio = fraction_exposed_change_ssp245 /
+      fraction_exposed_change_ssp126,
+    flood_attributable_deaths_change_ratio = flood_attributable_deaths_change_ssp245 /
+      flood_attributable_deaths_change_ssp126,
+    flood_attributable_death_rate_change_ratio = flood_attributable_death_rate_change_ssp245 /
+      flood_attributable_death_rate_change_ssp126
+  ) %>%
+  left_join(country_region_sdi_dict, by = "name")
+
+
+ssp_585_to_126_compare <- ssp_585_to_126_compare %>%
+  mutate(
+    population_ratio = population_ssp585 / population_ssp126,
+    #floods_ratio = floods_ssp585 / floods_ssp126,
+    fraction_exposed_ratio = fraction_exposed_ssp585 / fraction_exposed_ssp126,
+    #number_exposed_ratio = number_exposed_ssp585 / number_exposed_ssp126,
+    flood_attributable_deaths_ratio  = flood_attributable_deaths_ssp585 /
+      flood_attributable_deaths_ssp126,
+    flood_attributable_death_rate_ratio = flood_attributable_death_rate_ssp585 /
+      flood_attributable_death_rate_ssp126,
+    population_change_ratio = population_change_ssp585 / population_change_ssp126,
+    #floods_change_ratio = floods_change_ssp585 / floods_change_ssp126,
+    fraction_exposed_change_ratio = fraction_exposed_change_ssp585 /
+      fraction_exposed_change_ssp126,
+    flood_attributable_deaths_change_ratio = flood_attributable_deaths_change_ssp585 /
+      flood_attributable_deaths_change_ssp126,
+    flood_attributable_death_rate_change_ratio = flood_attributable_death_rate_change_ssp585 /
+      flood_attributable_death_rate_change_ssp126
+  ) %>%
+  left_join(country_region_sdi_dict, by = "name")
+
+
+ssp_585_to_245_compare <- ssp_585_to_245_compare %>%
+  mutate(
+    population_ratio = population_ssp585 / population_ssp245,
+    #floods_ratio = floods_ssp585 / floods_ssp245,
+    fraction_exposed_ratio = fraction_exposed_ssp585 / fraction_exposed_ssp245,
+    #number_exposed_ratio = number_exposed_ssp585 / number_exposed_ssp245,
+    flood_attributable_deaths_ratio  = flood_attributable_deaths_ssp585 /
+      flood_attributable_deaths_ssp245,
+    flood_attributable_death_rate_ratio = flood_attributable_death_rate_ssp585 /
+      flood_attributable_death_rate_ssp245,
+    population_change_ratio = population_change_ssp585 / population_change_ssp245,
+    #floods_change_ratio = floods_change_ssp585 / floods_change_ssp245,
+    fraction_exposed_change_ratio = fraction_exposed_change_ssp585 /
+      fraction_exposed_change_ssp245,
+    flood_attributable_deaths_change_ratio = flood_attributable_deaths_change_ssp585 /
+      flood_attributable_deaths_change_ssp245,
+    flood_attributable_death_rate_change_ratio = flood_attributable_death_rate_change_ssp585 /
+      flood_attributable_death_rate_change_ssp245
+  ) %>%
+  left_join(country_region_sdi_dict, by = "name")
+
+```
+
+## Plotting
+
+Heatmaps of changes in a chosen metric (e.g., deaths) for floods of a given size for all countries and all decades, for each SSP
+
+```{r plotting_woohoo, echo=FALSE}
+
+death_change_heatmap <- plot_heatmap_changes(ssp126_change_by_decade,
+                                             ssp245_change_by_decade,
+                                             ssp585_change_by_decade,
+                                             "flood_attributable_death_rate_change", 
+                                             "Death rate changes by decade")
+ggsave(paste0(results_dir, "/death_rate_change_heatmap.pdf"),
+    death_change_heatmap, 
+    width = 18,
+    height = 20,
+    dpi = 1000)
+
+```
+
+Plot maps of all countries for a chosen metric (e.g., flood-attributable death rates) for three decades (early, middle, and late) for all three climate futures
+
+```{r plotting_woohoo, echo=FALSE}
+
+all_futures_deaths <- plot_decade_maps_all_futures(ssp126_change_by_decade,
+                                            ssp245_change_by_decade,
+                                            ssp585_change_by_decade,
+                                            country_boundaries,
+                                            join_col = c("loc_id", "name", "code"),
+                                            variable = "flood_attributable_deaths", 
+                                            title = "Flood attributable deaths")
+ggsave(paste0(results_dir, "/all_futures_deaths.pdf"),
+    all_futures_deaths,
+    width = 24,
+    height = 12,
+    dpi = 1000)
+
+all_futures_death_rate <- plot_decade_maps_all_futures(ssp126_change_by_decade,
+                                            ssp245_change_by_decade,
+                                            ssp585_change_by_decade, 
+                                            country_boundaries,
+                                            join_col = c("loc_id", "name", "code"),
+                                            variable = "flood_attributable_death_rate", 
+                                            title = "Flood attributable death rate")
+ggsave(paste0(results_dir, "/all_futures_death_rate.pdf"),
+    all_futures_death_rate, 
+    width = 24,
+    height = 12,
+    dpi = 1000)
+
+```
+
+Make lineplots of the change in a metric (e.g., flood-attributable deaths) over the decades for eight super-regions comparing all three climate futures
+
+```{r region_line_graphs, echo=FALSE}
+
+region_deathrate_trends <- plot_decade_trends_for_regions(ssp126_change_by_decade,
+                                                          ssp245_change_by_decade,
+                                                          ssp585_change_by_decade,
+                                                          "region_death_rate")
+ggsave(paste0(results_dir, "/region_deathrate_over_time.pdf"),
+    region_deathrate_trends, 
+    width = 22,
+    height = 8,
+    dpi = 1000)
+
+```
+
+## Lives saved
+
+Calculate lives saved per decade comparing SSP 245 to SSP 126
+
+```{r lives_saved, echo=FALSE}
+
+ssp126_deaths_by_decade <- calculate_deaths(ssp126_decade)
+ssp245_deaths_by_decade <- calculate_deaths(ssp245_decade)
+
+deaths_comparison <- left_join(ssp126_deaths_by_decade,
+                                ssp245_deaths_by_decade,
+                                join_by(name, loc_id, decade, 
+                                        region_name, superregion_name)) %>%
+   mutate(deaths_difference_245_to_126 = 
+            flood_attributable_deaths_corrected.y - flood_attributable_deaths_corrected.x) %>%
+  group_by(name, loc_id) %>%
+  summarize(deaths_difference = sum(deaths_difference_245_to_126, na.rm = TRUE))
+    
+breaks <- c(-1E5, 0, 10, 100, 1E3, 1E4, 1E5, 1E7)
+colors <- c("#FCBBA1", brewer.pal(length(breaks) - 1, "Blues"))
+labels <- c("increased deaths", "0 - 10", "10-100", "100 - 1K", 
+            "1K - 10K", "10K - 100K", ">100K", ">10M")
+
+deaths_comparison <- deaths_comparison %>%
+  mutate(binned_val = cut(deaths_difference, 
+                          breaks = breaks,
+                          labels = labels[1:length(labels) - 1],
+                          include.lowest = TRUE)) %>%
+  left_join(country_boundaries, join_by("loc_id", "name"))
+
+deaths_avoided_245_to_126_map <- ggplot(data = deaths_comparison) +
+  geom_sf(aes(fill = binned_val, geometry = geometry), color = "black") +
+  scale_fill_manual(values = colors, drop = FALSE, 
+                    na.value = "white", name = "Deaths avoided") +
+  labs(title = 
+         "Flood-attributable deaths avoided by reducing emissions (from SSP 245 to SSP 126)", 
+       fill = "deaths_difference") +
+  theme_minimal()
+ggsave(paste0(results_dir, "/deaths_avoided_245_to_126_map.pdf"),
+    deaths_avoided_245_to_126_map,
+    width = 12,
+    height = 6,
+    dpi = 1000)
+
+  
+deaths_comparison_superregion <- left_join(ssp126_deaths_by_decade,
+                                           ssp245_deaths_by_decade,
+                                           join_by(name, loc_id, decade,
+                                                   region_name, superregion_name)) %>%
+   mutate(deaths_difference_245_to_126 = 
+            flood_attributable_deaths_corrected.y - flood_attributable_deaths_corrected.x) %>%
+   group_by(superregion_name) %>%
+   summarize(deaths_difference = sum(deaths_difference_245_to_126, na.rm = TRUE))
+ 
+deaths_avoided_245_to_126_superregions <- ggplot(data = deaths_comparison_superregion) +
+      geom_point(aes(x = superregion_name, y = deaths_difference), size = 3) +
+      theme_minimal() +
+      scale_color_brewer(
+        name = "Region",
+        palette = "Set1",
+        na.value = "white") +
+      labs(title = paste("Deaths avoided by shifting from SSP 245 to SSP 126"),
+           x = NULL,
+           y = "Flood attributable deaths avoided") +
+      theme(legend.position = "bottom",
+            axis.text = element_text(size = 16),
+            axis.title = element_text(size = 18),
+            title = element_text(size = 20))
+
+ggsave(paste0(results_dir, "/deaths_avoided_245_to_126.pdf"),
+    deaths_avoided_245_to_126_superregions, 
+    width = 10,
+    height = 8,
+    dpi = 1000)
+ 
+```
+
+## Handling uncertainty
+
+```{r uncertainty, echo=FALSE}
+
+# calculate mean for the decade for each value (_deacde)
+ssp126_decade_uncty <- summarize_decades(ssp126_yearly_uncty,
+                                        region_map = country_region_sdi_dict,
+                                        uncertainty = TRUE)
+ssp245_decade_uncty <- summarize_decades(ssp245_yearly_uncty,
+                                        region_map = country_region_sdi_dict,
+                                        uncertainty = TRUE)
+ssp585_decade_uncty <- summarize_decades(ssp585_yearly_uncty,
+                                        region_map = country_region_sdi_dict,
+                                        uncertainty = TRUE)
+
+# calculate percent change in decade mean from first decade for each value  (_change_by_decade)
+ssp126_change_by_decade_uncty <- relative_decade_change(ssp126_decade_uncty, 
+                                                       region_map = country_region_sdi_dict,
+                                                       uncertainty = TRUE)
+ssp245_change_by_decade_uncty <- relative_decade_change(ssp245_decade_uncty,
+                                                       region_map = country_region_sdi_dict,
+                                                       uncertainty = TRUE)
+ssp585_change_by_decade_uncty <- relative_decade_change(ssp585_decade_uncty,
+                                                       region_map = country_region_sdi_dict,
+                                                       uncertainty = TRUE)
+
+region_deathrate_trends_uncty <- plot_decade_trends_for_regions_with_uncty(ssp126_change_by_decade_uncty,
+                                                          ssp245_change_by_decade_uncty,
+                                                          ssp585_change_by_decade_uncty,
+                                                          "region_death_rate",
+                                                          "region_name")
+ggsave(paste0(results_dir, "/region_deathrate_over_time_uncty.pdf"),
+    region_deathrate_trends_uncty, 
+    width = 22,
+    height = 8,
+    dpi = 1000)
+
+superregion_deathrate_trends_uncty <- plot_decade_trends_for_regions_with_uncty(ssp126_change_by_decade_uncty,
+                                                          ssp245_change_by_decade_uncty,
+                                                          ssp585_change_by_decade_uncty,
+                                                          "region_death_rate",
+                                                          "superregion_name")
+ggsave(paste0(results_dir, "/superregion_deathrate_over_time_uncty.pdf"),
+    superregion_deathrate_trends_uncty, 
+    width = 22,
+    height = 8,
+    dpi = 1000)
+
+```
+
+## Summarize by geography
+
+```{r uncertainty, echo=FALSE}
+
+ssp126_country_death_rate_uncty <- summarize_by_geography(ssp126_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "name",
+                                                        uncertainty = TRUE)
+ssp126_region_death_rate_uncty <- summarize_by_geography(ssp126_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name",
+                                                        uncertainty = TRUE)
+write.csv(ssp126_region_death_rate_uncty, 
+            file = paste0(results_dir, "/ssp126_region_death_rate_uncty.csv"),
+            row.names = FALSE)
+
+
+ssp245_country_death_rate_uncty <- summarize_by_geography(ssp245_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "name",
+                                                        uncertainty = TRUE)
+ssp245_region_death_rate_uncty <- summarize_by_geography(ssp245_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name",
+                                                        uncertainty = TRUE)
+write.csv(ssp245_region_death_rate_uncty, 
+            file = paste0(results_dir, "/ssp245_region_death_rate_uncty.csv"),
+            row.names = FALSE)
+
+
+ssp585_country_death_rate_uncty <- summarize_by_geography(ssp585_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "name",
+                                                        uncertainty = TRUE)
+ssp585_region_death_rate_uncty <- summarize_by_geography(ssp585_change_by_decade_uncty,
+                                                        "flood_attributable_death_rate",
+                                                        "region_name",
+                                                        uncertainty = TRUE)
+write.csv(ssp585_region_death_rate_uncty, 
+            file = paste0(results_dir, "/ssp585_region_death_rate_uncty.csv"),
+            row.names = FALSE)
+
+```

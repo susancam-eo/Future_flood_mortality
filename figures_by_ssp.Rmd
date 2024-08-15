@@ -1,0 +1,263 @@
+---
+title: "Analyses, tables, visuals"
+author: "Susan Campbell"
+date: "2024-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Set up
+
+```{r libs, echo=FALSE}
+
+library(tidyverse)
+library(viridis)
+library(cowplot)
+library(sf)
+library(RColorBrewer)
+
+# specify directories
+dir <- "/Users/SusanCampbell/UW_HMS_R/capstone/"
+setwd(dir) 
+# set dir to save results to 
+results_dir <- paste0(dir, "results/overarch")
+
+# load functions in my process_input_functions.R
+source(paste0(dir, "processing_functions.R")) 
+
+```
+
+## Load data and set params
+
+```{r load_data, echo=FALSE}
+
+# read in map of country names to region identifiers and SDI info
+country_region_sdi_dict <- read.csv(file = "data/location_hierarchy.csv")
+
+# read in country boundaries shapefile
+country_boundaries <- st_read("data/GBD_countries/lbd_standard_admin_0_simplified.shp")
+names(country_boundaries) <- c("code", "name", "loc_id", "geo_id", "geometry")
+
+
+
+ssp126_10yr_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_10yrSSP126.csv"))
+ssp126_10yr_decade_uncty <- summarize_decades(ssp126_10yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp245_10yr_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_10yrSSP245.csv"))
+ssp245_10yr_decade_uncty <- summarize_decades(ssp245_10yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp585_10yr_yearly_uncty <- read.csv(paste0(dir, "results/10yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_10yrSSP585.csv"))
+ssp585_10yr_decade_uncty <- summarize_decades(ssp585_10yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+
+ssp126_30yr_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_30yrSSP126.csv"))
+ssp126_30yr_decade_uncty <- summarize_decades(ssp126_30yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp245_30yr_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_30yrSSP245.csv"))
+ssp245_30yr_decade_uncty <- summarize_decades(ssp245_30yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp585_30yr_yearly_uncty <- read.csv(paste0(dir, "results/30yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_30yrSSP585.csv"))
+ssp585_30yr_decade_uncty <- summarize_decades(ssp585_30yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+
+ssp126_100yr_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP126/country/country_yearly"
+                                                  ,"_findings_uncertainty_100yrSSP126.csv"))
+ssp126_100yr_decade_uncty <- summarize_decades(ssp126_100yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp245_100yr_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP245/country/country_yearly",
+                                                  "_findings_uncertainty_100yrSSP245.csv"))
+ssp245_100yr_decade_uncty <- summarize_decades(ssp245_100yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+ssp585_100yr_yearly_uncty <- read.csv(paste0(dir, "results/100yrSSP585/country/country_yearly",
+                                                  "_findings_uncertainty_100yrSSP585.csv"))
+ssp585_100yr_decade_uncty <- summarize_decades(ssp585_100yr_yearly_uncty,
+                                              region_map = country_region_sdi_dict,
+                                              uncertainty = TRUE)
+
+```
+
+```{r load_data, echo=FALSE}
+
+dataframes <- list(ssp126_10yr_decade_uncty, ssp245_10yr_decade_uncty, ssp585_10yr_decade_uncty,
+                   ssp126_30yr_decade_uncty, ssp245_30yr_decade_uncty, ssp585_30yr_decade_uncty,
+                   ssp126_100yr_decade_uncty, ssp245_100yr_decade_uncty, ssp585_100yr_decade_uncty)
+
+aggregate_by_ssp <- function(ssp_dfs) {
+  df_combined <- bind_rows(ssp_dfs) %>%
+    group_by(name, loc_id, decade, superregion_name, region_name) %>%
+    summarize(
+      flood_attributable_deaths = sum(flood_attributable_deaths, na.rm = TRUE),
+      flood_attributable_deaths_lower = sum(flood_attributable_deaths_lower, na.rm = TRUE),
+      flood_attributable_deaths_upper = sum(flood_attributable_deaths_upper, na.rm = TRUE),
+      flood_attributable_death_rate = sum(flood_attributable_death_rate, na.rm = TRUE),
+      flood_attributable_death_rate_lower = sum(flood_attributable_death_rate_lower, na.rm = TRUE),
+      flood_attributable_death_rate_upper = sum(flood_attributable_death_rate_upper, na.rm = TRUE),
+      fraction_exposed = mean(fraction_exposed, na.rm = TRUE),
+      .groups = 'drop'
+    )
+  return(df_combined)
+}
+
+# separate and aggregate dataframes by SSP type
+ssp126 <- aggregate_by_ssp(dataframes[c(1,4,7)])
+ssp245 <- aggregate_by_ssp(dataframes[c(2,5,8)])
+ssp585 <- aggregate_by_ssp(dataframes[c(3,6,9)])
+
+region_deathrate_trends_uncty <- plot_decade_trends_for_regions_with_uncty(ssp126,
+                                                          ssp245,
+                                                          ssp585,
+                                                          "region_death_rate",
+                                                          "region_name")
+ggsave(paste0(results_dir, "/region_deathrate_over_time_uncty.pdf"),
+    region_deathrate_trends_uncty, 
+    width = 22,
+    height = 8,
+    dpi = 1000)
+
+superregion_deathrate_trends_uncty <- plot_decade_trends_for_regions_with_uncty(ssp126,
+                                                          ssp245,
+                                                          ssp585,
+                                                          "region_death_rate",
+                                                          "superregion_name")
+ggsave(paste0(results_dir, "/superregion_deathrate_over_time_uncty.pdf"),
+    superregion_deathrate_trends_uncty, 
+    width = 22,
+    height = 8,
+    dpi = 1000)
+
+```
+
+```{r map_avoid_deaths, echo=FALSE}
+
+source(paste0(dir, "processing_functions.R")) 
+
+ssp126_deaths_by_decade <- calculate_deaths(ssp126)
+ssp245_deaths_by_decade <- calculate_deaths(ssp245)
+
+deaths_comparison <- left_join(ssp126_deaths_by_decade,
+                                ssp245_deaths_by_decade,
+                                join_by(name, loc_id, decade, 
+                                        region_name, superregion_name)) %>%
+   mutate(deaths_difference_245_to_126 = 
+            flood_attributable_deaths_corrected.y - flood_attributable_deaths_corrected.x) %>%
+  group_by(name, loc_id) %>%
+  summarize(deaths_difference = sum(deaths_difference_245_to_126, na.rm = TRUE))
+write.csv(deaths_comparison, 
+            file = paste0(results_dir, "/country_deaths_avoided.csv"),
+            row.names = FALSE)
+    
+breaks <- c(-1E5, -1E3, 0, 100, 1E3, 1E4, 1E5, 1E7)
+colors <- c("#FC9272", "#FEE0D2", brewer.pal(length(breaks) - 1, "Blues"))
+labels <- c(">1K increase","0 - 1K increase", "0 - 100", "100 - 1K", 
+            "1K - 10K", "10K - 100K", ">100K", ">10M")
+
+deaths_comparison <- deaths_comparison %>%
+  mutate(binned_val = cut(deaths_difference, 
+                          breaks = breaks,
+                          labels = labels[1:length(labels) - 1],
+                          include.lowest = TRUE)) %>%
+  left_join(country_boundaries, join_by("loc_id", "name"))
+
+deaths_avoided_245_to_126_map <- ggplot(data = deaths_comparison) +
+  geom_sf(aes(fill = binned_val, geometry = geometry), color = "black") +
+  scale_fill_manual(values = colors, drop = FALSE, 
+                    na.value = "white", name = "Deaths avoided") +
+  labs(title = 
+         "Flood-attributable deaths avoided by reducing emissions (from SSP 245 to SSP 126)", 
+       fill = "deaths_difference") +
+  theme_minimal()
+ggsave(paste0(results_dir, "/deaths_avoided_245_to_126_map.pdf"),
+    deaths_avoided_245_to_126_map,
+    width = 12,
+    height = 6,
+    dpi = 1000)
+
+
+deaths_avoided <- sum(deaths_comparison$deaths_difference)
+
+```
+
+
+```{r diff_by_end_century, echo=FALSE}
+
+ssp126_region_death_rate_change <- ssp126 %>%
+  group_by(region_name, decade) %>%
+  summarize(
+        region_deaths = mean(flood_attributable_deaths, na.rm = TRUE),
+        region_deaths_lower = mean(flood_attributable_deaths_lower, na.rm = TRUE),
+        region_deaths_upper = mean(flood_attributable_deaths_upper, na.rm = TRUE),
+        region_death_rate = mean(flood_attributable_death_rate, na.rm = TRUE) * 1E5,
+        region_death_rate_lower = mean(flood_attributable_death_rate_lower, na.rm = TRUE) * 1E5,
+        region_death_rate_upper = mean(flood_attributable_death_rate_upper, na.rm = TRUE) * 1E5,
+        ) %>%
+  select(region_name, decade, region_death_rate_upper) %>%
+  pivot_wider(names_from = decade, values_from = region_death_rate_upper) %>%
+  mutate(diff_2070_2020 = (`2070` - `2020`)/`2020`,
+         diff_2120_2020 = (`2120` - `2020`)/`2020`)
+write.csv(ssp126_region_death_rate_change, 
+            file = paste0(results_dir, "/ssp126_region_death_rate_upper_change.csv"),
+            row.names = FALSE)
+
+ssp245_region_death_rate_change <- ssp245 %>%
+  group_by(region_name, decade) %>%
+  summarize(
+        region_deaths = mean(flood_attributable_deaths, na.rm = TRUE),
+        region_deaths_lower = mean(flood_attributable_deaths_lower, na.rm = TRUE),
+        region_deaths_upper = mean(flood_attributable_deaths_upper, na.rm = TRUE),
+        region_death_rate = mean(flood_attributable_death_rate, na.rm = TRUE) * 1E5,
+        region_death_rate_lower = mean(flood_attributable_death_rate_lower, na.rm = TRUE) * 1E5,
+        region_death_rate_upper = mean(flood_attributable_death_rate_upper, na.rm = TRUE) * 1E5,
+        ) %>%
+  select(region_name, decade, region_death_rate_upper) %>%
+  pivot_wider(names_from = decade, values_from = region_death_rate_upper) %>%
+  mutate(diff_2070_2020 = (`2070` - `2020`)/`2020`,
+         diff_2120_2020 = (`2120` - `2020`)/`2020`)
+write.csv(ssp245_region_death_rate_change, 
+            file = paste0(results_dir, "/ssp245_region_death_rate_upper_change.csv"),
+            row.names = FALSE)
+
+ssp585_region_death_rate_change <- ssp585 %>%
+  group_by(region_name, decade) %>%
+  summarize(
+        region_deaths = mean(flood_attributable_deaths, na.rm = TRUE),
+        region_deaths_lower = mean(flood_attributable_deaths_lower, na.rm = TRUE),
+        region_deaths_upper = mean(flood_attributable_deaths_upper, na.rm = TRUE),
+        region_death_rate = mean(flood_attributable_death_rate, na.rm = TRUE) * 1E5,
+        region_death_rate_lower = mean(flood_attributable_death_rate_lower, na.rm = TRUE) * 1E5,
+        region_death_rate_upper = mean(flood_attributable_death_rate_upper, na.rm = TRUE) * 1E5,
+        ) %>%
+  select(region_name, decade, region_death_rate_upper) %>%
+  pivot_wider(names_from = decade, values_from = region_death_rate_upper) %>%
+  mutate(diff_2070_2020 = (`2070` - `2020`)/`2020`,
+         diff_2120_2020 = (`2120` - `2020`)/`2020`)
+write.csv(ssp585_region_death_rate_change, 
+            file = paste0(results_dir, "/ssp585_region_death_rate_upper_change.csv"),
+            row.names = FALSE)
+
+```
+
